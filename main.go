@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"time"
@@ -13,9 +14,36 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
-func handleIndex(w http.ResponseWriter, r *http.Request) {
+func handleTest(w http.ResponseWriter, r *http.Request) {
 	log.Println("https request")
 	io.WriteString(w, `<html><body>Welcome!</body></html>`)
+}
+
+func handleBytes(bytes []byte) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("https request")
+		w.Write(bytes)
+	}
+}
+
+func handleFile(file string) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("non push file request: ", file)
+		http.ServeFile(w, r, file)
+	}
+}
+
+func handlePushTest(bytes []byte) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if pusher, ok := w.(http.Pusher); ok {
+			if err := pusher.Push("/me.jpg", nil); err != nil {
+				log.Printf("Failed to push: %v", err)
+			}
+
+			log.Println("https request")
+			w.Write(bytes)
+		}
+	}
 }
 
 type config struct {
@@ -50,6 +78,11 @@ func getConf() (config, error) {
 }
 
 func main() {
+	index, err := ioutil.ReadFile("index.html")
+	if err != nil {
+		log.Fatalf("Unable to read index.html")
+	}
+
 	config, err := getConf()
 	if err != nil {
 		log.Fatalf("Unable to retrieve config options: %s", err.Error())
@@ -79,7 +112,8 @@ func main() {
 
 	// HTTPS server
 	httpsMux := &http.ServeMux{}
-	httpsMux.HandleFunc("/", handleIndex)
+	httpsMux.HandleFunc("/", handlePushTest(index))
+	httpsMux.HandleFunc("/me.jpg", handleFile("me.jpg"))
 	httpsServer := &http.Server{
 		ReadTimeout:  config.readTimeout,
 		WriteTimeout: config.writeTimeout,
