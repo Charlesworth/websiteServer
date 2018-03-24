@@ -5,49 +5,58 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"time"
 
+	"github.com/julienschmidt/httprouter"
 	"golang.org/x/crypto/acme/autocert"
 )
 
-func handleTest(w http.ResponseWriter, r *http.Request) {
-	log.Println("https request")
-	io.WriteString(w, `<html><body>Welcome!</body></html>`)
-}
+var debug bool
 
-func handleBytes(bytes []byte) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		log.Println("https request")
-		w.Write(bytes)
+func handleIndexPush() func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	file, err := ioutil.ReadFile("charlesworth.github.io/index.html")
+	if err != nil {
+		log.Fatalf("Unable to read index.html")
 	}
-}
 
-func handleFile(file string) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		log.Println("non push file request: ", file)
-		http.ServeFile(w, r, file)
-	}
-}
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		if debug {
+			log.Println("index.html PUSH requested")
+		}
 
-func handlePushTest(bytes []byte) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
 		if pusher, ok := w.(http.Pusher); ok {
-			if err := pusher.Push("/me.jpg", nil); err != nil {
+			if err := pusher.Push("/me.jpg", &http.PushOptions{
+				Method: "GET",
+			}); err != nil {
 				log.Printf("Failed to push: %v", err)
 			}
 
-			log.Println("https request")
-			w.Write(bytes)
+			w.Write(file)
+			w.(http.Flusher).Flush()
 		}
+	}
+}
+
+func handleFile(fileName string) func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	file, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		log.Fatalf("Unable to read %s", fileName)
+	}
+
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		if debug {
+			log.Printf("%s requested", fileName)
+		}
+		w.Write(file)
 	}
 }
 
 type config struct {
 	domain         string
+	debug          bool
 	cirtificateDir string
 	readTimeout    time.Duration
 	writeTimeout   time.Duration
@@ -57,11 +66,13 @@ type config struct {
 func getConf() (config, error) {
 	var domain, cirtificateDir string
 	var readTimeout, writeTimeout, idleTimeout time.Duration
+	var debug bool
 	flag.StringVar(&domain, "domain", "", "REQUIRED: the domain to point to, i.e. www.ccochrane.com")
 	flag.StringVar(&cirtificateDir, "cirt_dir", ".", "the directory to store generated tls certificates")
 	flag.DurationVar(&readTimeout, "read_timeout", time.Second*5, "HTTP read timeout")
 	flag.DurationVar(&writeTimeout, "write_timeout", time.Second*5, "HTTP write timeout")
 	flag.DurationVar(&idleTimeout, "idle_timeout", time.Second*5, "HTTP idle timeout")
+	flag.BoolVar(&debug, "debug", false, "turn on debug logging")
 	flag.Parse()
 
 	if domain == "" {
@@ -70,6 +81,7 @@ func getConf() (config, error) {
 
 	return config{
 		domain:         domain,
+		debug:          debug,
 		cirtificateDir: cirtificateDir,
 		readTimeout:    readTimeout,
 		writeTimeout:   writeTimeout,
@@ -78,17 +90,15 @@ func getConf() (config, error) {
 }
 
 func main() {
-	index, err := ioutil.ReadFile("index.html")
-	if err != nil {
-		log.Fatalf("Unable to read index.html")
-	}
-
 	config, err := getConf()
 	if err != nil {
 		log.Fatalf("Unable to retrieve config options: %s", err.Error())
 	}
 
-	fmt.Printf("Config: %+v\n", config)
+	if config.debug {
+		fmt.Printf("Config: %+v\n", config)
+		debug = true
+	}
 
 	certManager := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
@@ -111,14 +121,18 @@ func main() {
 	}()
 
 	// HTTPS server
-	httpsMux := &http.ServeMux{}
-	httpsMux.HandleFunc("/", handlePushTest(index))
-	httpsMux.HandleFunc("/me.jpg", handleFile("me.jpg"))
+	httpsRouter := httprouter.New()
+	httpsRouter.GET("/", handleIndexPush())
+	httpsRouter.GET("/index.html", handleFile("charlesworth.github.io/index.html"))
+	httpsRouter.GET("/me.jpg", handleFile("charlesworth.github.io/me.jpg"))
+	httpsRouter.GET("/favicon.png", handleFile("charlesworth.github.io/favicon.png"))
+	httpsRouter.GET("/CVCharlesCochrane.pdf", handleFile("charlesworth.github.io/CVCharlesCochrane.pdf"))
+	httpsRouter.GET("/keybase.txt", handleFile("charlesworth.github.io/keybase.txt"))
 	httpsServer := &http.Server{
 		ReadTimeout:  config.readTimeout,
 		WriteTimeout: config.writeTimeout,
 		IdleTimeout:  config.idleTimeout,
-		Handler:      httpsMux,
+		Handler:      httpsRouter,
 		Addr:         ":443",
 		TLSConfig:    &tls.Config{GetCertificate: certManager.GetCertificate},
 	}
