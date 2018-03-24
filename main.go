@@ -137,9 +137,9 @@ func getConf() (config, error) {
 	flag.StringVar(&domain, "domain", "", "REQUIRED: the domain to point to, i.e. www.ccochrane.com")
 	flag.StringVar(&mappings, "mappings", "mappings.json", "REQUIRED: the mapping file for endpoints")
 	flag.StringVar(&cirtificateDir, "cirt_dir", ".", "the directory to store generated tls certificates")
-	flag.DurationVar(&readTimeout, "read_timeout", time.Second, "HTTP read timeout")
-	flag.DurationVar(&writeTimeout, "write_timeout", time.Second, "HTTP write timeout")
-	flag.DurationVar(&idleTimeout, "idle_timeout", time.Second, "HTTP idle timeout")
+	flag.DurationVar(&readTimeout, "read_timeout", time.Second*5, "HTTP read timeout")
+	flag.DurationVar(&writeTimeout, "write_timeout", time.Second*5, "HTTP write timeout")
+	flag.DurationVar(&idleTimeout, "idle_timeout", time.Second*5, "HTTP idle timeout")
 	flag.BoolVar(&debug, "debug", false, "turn on debug logging")
 	flag.Parse()
 
